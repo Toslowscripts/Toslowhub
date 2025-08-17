@@ -16,7 +16,7 @@ local NotificationUI = ReplicatedStorage.Notification_UI
 local NotificationUIMobile = ReplicatedStorage.Notification_UI_Mobile
 
 -- The main Discord link variable, making it easy to update.
-local discordlink = "https://discord.gg/QXdGxfgxdm"
+local discordlink = "https://discord.gg/qqP9TFKnt3"
 
 -- Load the Fluent library and its addons
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
